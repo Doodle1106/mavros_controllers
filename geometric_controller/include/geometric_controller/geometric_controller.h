@@ -14,6 +14,7 @@
 
 #include <Eigen/Dense>
 #include <std_msgs/Float32.h>
+#include <std_msgs/String.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/TwistStamped.h>
@@ -26,10 +27,8 @@
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/CompanionProcessStatus.h>
 
-#include <controller_msgs/FlatTarget.h>
+
 #include <std_srvs/SetBool.h>
-#include <trajectory_msgs/MultiDOFJointTrajectoryPoint.h>
-#include <trajectory_msgs/MultiDOFJointTrajectory.h>
 #include <dynamic_reconfigure/server.h>
 #include <geometric_controller/GeometricControllerConfig.h>
 
@@ -64,6 +63,10 @@ class geometricCtrl
     ros::Subscriber mavposeSub_, gzmavposeSub_;
     ros::Subscriber mavtwistSub_;
     ros::Subscriber yawreferenceSub_;
+
+    //TODO
+    ros::Subscriber shrtestSub_;
+
     ros::Publisher rotorVelPub_, angularVelPub_, target_pose_pub_;
     ros::Publisher referencePosePub_;
     ros::Publisher posehistoryPub_;
@@ -116,10 +119,10 @@ class geometricCtrl
     void pubSystemStatus();
     void appendPoseHistory();
     void odomCallback(const nav_msgs::OdometryConstPtr& odomMsg);
-    void targetCallback(const geometry_msgs::TwistStamped& msg);
-    void flattargetCallback(const controller_msgs::FlatTarget& msg);
+    void StateStringCallback(const std_msgs::String& msg);
+
     void yawtargetCallback(const std_msgs::Float32& msg);
-    void multiDOFJointCallback(const trajectory_msgs::MultiDOFJointTrajectory& msg);
+
     void keyboardCallback(const geometry_msgs::Twist& msg);
     void cmdloopCallback(const ros::TimerEvent& event);
     void mavstateCallback(const mavros_msgs::State::ConstPtr& msg);
@@ -148,6 +151,9 @@ class geometricCtrl
     };
     geometry_msgs::Pose home_pose_;
     bool received_home_pose;
+
+    vector<double> Str2Vec(string state);
+
 
   public:
     void dynamicReconfigureCallback(geometric_controller::GeometricControllerConfig &config,uint32_t level);

@@ -14,13 +14,14 @@ geometricCtrl::geometricCtrl(const ros::NodeHandle& nh, const ros::NodeHandle& n
   feedthrough_enable_(false),
   node_state(WAITING_FOR_HOME_POSE) {
 
-  referenceSub_=nh_.subscribe("reference/setpoint",1, &geometricCtrl::targetCallback,this,ros::TransportHints().tcpNoDelay());
-  flatreferenceSub_ = nh_.subscribe("reference/flatsetpoint", 1, &geometricCtrl::flattargetCallback, this, ros::TransportHints().tcpNoDelay());
   yawreferenceSub_ = nh_.subscribe("reference/yaw", 1, &geometricCtrl::yawtargetCallback, this, ros::TransportHints().tcpNoDelay());
-  multiDOFJointSub_ = nh_.subscribe("/command/trajectory", 1, &geometricCtrl::multiDOFJointCallback, this, ros::TransportHints().tcpNoDelay());
+
   mavstateSub_ = nh_.subscribe("/mavros/state", 1, &geometricCtrl::mavstateCallback, this,ros::TransportHints().tcpNoDelay());
   mavposeSub_ = nh_.subscribe("/mavros/local_position/pose", 1, &geometricCtrl::mavposeCallback, this,ros::TransportHints().tcpNoDelay());
   mavtwistSub_ = nh_.subscribe("/mavros/local_position/velocity_local", 1, &geometricCtrl::mavtwistCallback, this,ros::TransportHints().tcpNoDelay());
+
+  shrtestSub_ = nh_.subscribe("gi/desired_state/string", 1, &geometricCtrl::StateStringCallback, this,ros::TransportHints().tcpNoDelay());
+
   ctrltriggerServ_ = nh_.advertiseService("tigger_rlcontroller", &geometricCtrl::ctrltriggerCallback, this);
   cmdloop_timer_ = nh_.createTimer(ros::Duration(0.01), &geometricCtrl::cmdloopCallback, this); // Define timer for constant loop rate
   statusloop_timer_ = nh_.createTimer(ros::Duration(1), &geometricCtrl::statusloopCallback, this); // Define timer for constant loop rate
@@ -73,85 +74,58 @@ geometricCtrl::~geometricCtrl() {
   //Destructor
 }
 
-void geometricCtrl::targetCallback(const geometry_msgs::TwistStamped& msg) {
-
-  reference_request_last_ = reference_request_now_;
-  targetPos_prev_ = targetPos_;
-  targetVel_prev_ = targetVel_;
-
-  reference_request_now_ = ros::Time::now();
-  reference_request_dt_ = (reference_request_now_ - reference_request_last_).toSec();
-
-  targetPos_ << msg.twist.angular.x, msg.twist.angular.y, msg.twist.angular.z;
-  targetVel_ << msg.twist.linear.x, msg.twist.linear.y, msg.twist.linear.z;
-
-  if(reference_request_dt_ > 0) targetAcc_ = (targetVel_ - targetVel_prev_ ) / reference_request_dt_;
-  else targetAcc_ = Eigen::Vector3d::Zero();
-
+vector<double> geometricCtrl::Str2Vec(string state)
+{
+    vector<double> result;
+    stringstream s_stream(state);
+    while(s_stream.good())
+    {
+        string substr;
+        getline(s_stream, substr, ',');
+        result.push_back(std::stod(substr));
+    }
+    for(int i = 0; i<result.size(); i++)
+    {
+        cout<<result.at(i) << ", ";
+    }
+    return result;
 }
 
-void geometricCtrl::flattargetCallback(const controller_msgs::FlatTarget& msg) {
+void geometricCtrl::StateStringCallback(const std_msgs::String& msg)
+{
+    cout<<"received string: "<<msg.data<<endl;
+    string s = msg.data;
+    string position = s.substr(9, s.find("velocity") - 10);
+    string velocity = s.substr(s.find("velocity") + 9, s.find("acceleration") - (s.find("velocity") + 9) - 1);
+    string acceleration = s.substr(s.find("acceleration") + 13, s.find("jerk") - (s.find("acceleration") + 13) - 1);
+    string jerk = s.substr(s.find("jerk") + 5, s.find("snap") - (s.find("jerk") + 5) - 1);
+    string snap = s.substr(s.find("snap") + 5, s.length());
 
-  reference_request_last_ = reference_request_now_;
+    cout<<"position: "<<position<<endl;
+    cout<<"velocity: "<<velocity<<endl;
+    cout<<"acceleration: "<<acceleration<<endl;
+    cout<<"jerk: "<<jerk<<endl;
+    cout<<"snap: "<<snap<<endl;
 
-  targetPos_prev_ = targetPos_;
-  targetVel_prev_ = targetVel_;
+    vector<double> p_ = Str2Vec(position);
+    vector<double> v_ = Str2Vec(velocity);
+    vector<double> a_ = Str2Vec(acceleration);
+    vector<double> j_ = Str2Vec(jerk);
+    vector<double> s_ = Str2Vec(snap);
 
-  reference_request_now_ = ros::Time::now();
-  reference_request_dt_ = (reference_request_now_ - reference_request_last_).toSec();
+    targetPos_ << p_[0], p_[1], p_[2];
+    targetVel_ << v_[0], v_[1], v_[2];
 
-  targetPos_ << msg.position.x, msg.position.y, msg.position.z;
-  targetVel_ << msg.velocity.x, msg.velocity.y, msg.velocity.z;
+    targetAcc_ << a_[0], a_[1], a_[2];
+    targetJerk_ << j_[0], j_[1], j_[2];
+    targetSnap_ << s_[0], s_[1], s_[2];
 
-  if(msg.type_mask == 1) {
-
-    targetAcc_ << msg.acceleration.x, msg.acceleration.y, msg.acceleration.z;
-    targetJerk_ << msg.jerk.x, msg.jerk.y, msg.jerk.z;
-    targetSnap_ << 0.0, 0.0, 0.0;
-
-  } else if (msg.type_mask == 2) {
-
-    targetAcc_ << msg.acceleration.x, msg.acceleration.y, msg.acceleration.z;
-    targetJerk_ << 0.0, 0.0, 0.0;
-    targetSnap_ << 0.0, 0.0, 0.0;
-
-  } else if (msg.type_mask == 4) {
-
-    targetAcc_ << 0.0, 0.0, 0.0;
-    targetJerk_ << 0.0, 0.0, 0.0;
-    targetSnap_ << 0.0, 0.0, 0.0;
-
-  } else {
-
-    targetAcc_ << msg.acceleration.x, msg.acceleration.y, msg.acceleration.z;
-    targetJerk_ << msg.jerk.x, msg.jerk.y, msg.jerk.z;
-    targetSnap_ << msg.snap.x, msg.snap.y, msg.snap.z;
-
-  }
 }
 
 void geometricCtrl::yawtargetCallback(const std_msgs::Float32& msg) {
   if(!velocity_yaw_) mavYaw_ = double(msg.data);
 }
 
-void geometricCtrl::multiDOFJointCallback(const trajectory_msgs::MultiDOFJointTrajectory& msg) {
-
-  trajectory_msgs::MultiDOFJointTrajectoryPoint pt = msg.points[0];
-  reference_request_last_ = reference_request_now_;
-
-  targetPos_prev_ = targetPos_;
-  targetVel_prev_ = targetVel_;
-
-  reference_request_now_ = ros::Time::now();
-  reference_request_dt_ = (reference_request_now_ - reference_request_last_).toSec();
-
-  targetPos_ << pt.transforms[0].translation.x, pt.transforms[0].translation.y, pt.transforms[0].translation.z;
-  targetVel_ << pt.velocities[0].linear.x, pt.velocities[0].linear.y, pt.velocities[0].linear.z;
-
-  targetAcc_ << pt.accelerations[0].linear.x, pt.accelerations[0].linear.y, pt.accelerations[0].linear.z;
-  targetJerk_ << 0.0, 0.0, 0.0;
-  targetSnap_ << 0.0, 0.0, 0.0;
-}
 
 void geometricCtrl::mavposeCallback(const geometry_msgs::PoseStamped& msg){
   if(!received_home_pose){
@@ -423,18 +397,6 @@ Eigen::Vector4d geometricCtrl::attcontroller(Eigen::Vector4d &ref_att, Eigen::Ve
   return ratecmd;
 }
 
-void geometricCtrl::getStates(Eigen::Vector3d &pos, Eigen::Vector4d &att, Eigen::Vector3d &vel, Eigen::Vector3d &angvel){
-  pos = mavPos_;
-  att = mavAtt_;
-  vel = mavVel_;
-  angvel = mavRate_;
-
-}
-
-void geometricCtrl::getErrors(Eigen::Vector3d &pos, Eigen::Vector3d &vel){
-  pos = errorPos_;
-  vel = errorVel_;
-}
 
 bool geometricCtrl::ctrltriggerCallback(std_srvs::SetBool::Request &req,
                                           std_srvs::SetBool::Response &res){
@@ -444,17 +406,6 @@ bool geometricCtrl::ctrltriggerCallback(std_srvs::SetBool::Request &req,
   res.success = ctrl_mode_;
   res.message = "controller triggered";
 }
-
-void geometricCtrl::setBodyRateCommand(Eigen::Vector4d bodyrate_command){
-  cmdBodyRate_= bodyrate_command;
-
-}
-
-void geometricCtrl::setFeedthrough(bool feed_through){
-  feedthrough_enable_ = feed_through;
-
-}
-
 
 void geometricCtrl::dynamicReconfigureCallback(geometric_controller::GeometricControllerConfig &config, uint32_t  level) {
 
