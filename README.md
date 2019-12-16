@@ -1,3 +1,15 @@
+## Add Custom String Target Callback to Replace Original Message Type
+
+1. add two test trajectories.
+2. use roslaunch geometric_controller test.launch to start testing.
+
+
+
+
+
+
+
+
 # mavros_controllers
 [![Build Status](https://travis-ci.org/Jaeyoung-Lim/mavros_controllers.png?branch=master)](https://travis-ci.org/Jaeyoung-Lim/mavros_controllers) [![DOI](https://zenodo.org/badge/140596755.svg)](https://zenodo.org/badge/latestdoi/140596755)
 
